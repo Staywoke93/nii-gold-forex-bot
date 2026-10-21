@@ -1,4 +1,3 @@
-yaml
 name: nii-gold-forex-bot
 on:
   workflow_dispatch:
