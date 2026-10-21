@@ -1,57 +1,56 @@
 import yfinance as yf
-import pandas as pd
 import requests
-from datetime import datetime
 
 NTFY_TOPIC = "nii-gold-forex-bot"
 
-def send_push(title, message):
+def send_ntfy(message, title="Gold Signal"):
     try:
         requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}",
             data=message.encode('utf-8'),
-            headers={"Title": title, "Priority": "high"}
+            headers={
+                "Title": title,
+                "Priority": "high",
+                "Tags": "chart_with_upwards_trend"
+            },
+            timeout=10
         )
-        print(f"PUSH SENT: {title}")
+        print(f"Sent: {title} - {message}")
     except Exception as e:
-        print(e)
+        print(f"ntfy error: {e}")
 
-SYMBOLS = {
-    "EURUSD=X": "EURUSD",
-    "GBPUSD=X": "GBPUSD", 
-    "GC=F": "GOLD",
-    "BTC-USD": "BTC",
-    "ETH-USD": "ETH"
-}
+def main():
+    print("Fetching Gold data...")
+    try:
+        gold = yf.download("GC=F", period="5d", interval="15m", progress=False, auto_adjust=True)
+        
+        if gold.empty:
+            gold = yf.download("XAUUSD=X", period="5d", interval="15m", progress=False, auto_adjust=True)
+        
+        if gold.empty:
+            print("No gold data found")
+            return
 
-def get_signal(symbol):
-    df = yf.download(symbol, period="3d", interval="15m", progress=False, auto_adjust=True)
-    if len(df) < 200:
-        return None, None
-    df['EMA50'] = df['Close'].ewm(span=50).mean()
-    df['EMA200'] = df['Close'].ewm(span=200).mean()
-    df['ATR'] = (df['High'] - df['Low']).rolling(14).mean()
-    delta = df['Close'].diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = -delta.where(delta < 0, 0).rolling(14).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    last = df.iloc[-1]
-    atr_val = float(last['ATR']) if not pd.isna(last['ATR']) else float(last['Close']*0.002)
-    price = float(last['Close'])
-    if last['Close'] > last['EMA50'] > last['EMA200'] and 55 < last['RSI'] < 70:
-        return "BUY NOW", f"{symbol} BUY at {price:.2f} SL {price - atr_val*1.5:.2f} TP {price + atr_val*3:.2f}"
-    if last['Close'] < last['EMA50'] < last['EMA200'] and 30 < last['RSI'] < 45:
-        return "SELL NOW", f"{symbol} SELL at {price:.2f} SL {price + atr_val*1.5:.2f} TP {price - atr_val*3:.2f}"
-    return None, None
+        close_price = float(gold['Close'].iloc[-1])
+        open_price = float(gold['Open'].iloc[-1])
+        
+        change = ((close_price - open_price) / open_price) * 100
+        
+        if change > 0.2:
+            signal = f"BUY Gold - Up {change:.2f}% | Price: {close_price:.2f}"
+        elif change < -0.2:
+            signal = f"SELL Gold - Down {change:.2f}% | Price: {close_price:.2f}"
+        else:
+            signal = f"HOLD Gold - {change:.2f}% | Price: {close_price:.2f}"
+        
+        print(signal)
+        send_ntfy(signal, title="Nii Gold Bot")
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        send_ntfy(f"Bot error: {e}", title="Bot Error")
 
-print("Scanning...")
-for sym in SYMBOLS:
-    title, msg = get_signal(sym)
-    if title:
-        send_push(f"{title} - {SYMBOLS[sym]}", msg)
-
-# send test once per day at 8AM
-now = datetime.utcnow()
-if now.hour == 8 and now.minute < 15:
-    send_push("Bot Active", "Nii, Gold+Forex scanner running 8-11AM Ghana time")
+if _name_ == "_main_":
+    main()
